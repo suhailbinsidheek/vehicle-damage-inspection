@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vehicle Damage Review</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="entry-splash" id="entrySplash" aria-label="Loading Vehicle Damage Review">
+    <div class="entry-splash-card">
+      <img src="vehicle-logo.jpe" alt="">
+      <span class="entry-spinner" aria-hidden="true"></span>
+      <strong>Preparing vehicle inspection</strong>
+      <span>Loading local AI tools...</span>
+    </div>
+  </div>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <div class="brand">
+          <a class="brand-link" href="./index.html" aria-label="Reload Vehicle Damage Review">
+            <img src="vehicle-logo.jpe" alt="Vehicle Damage Review logo">
+          </a>
+          <p class="eyebrow" href="./index.html">VEHICLE INSPECTION</p>
+        </div>
+        <h1>Compare before and after</h1>
+        <p class="subtitle">Review two videos frame by frame to spot possible damage, dents, or scratches.</p>
+      </div>
+      <div class="status-pill"><span class="status-dot" id="modelDot"></span> <span id="modelStatus">AI model loading</span></div>
+    </header>
+
+    <section class="instructions" aria-labelledby="instructions-heading">
+      <div class="instructions-heading">
+        <p class="eyebrow">BEFORE YOU START</p>
+        <h2 id="instructions-heading">How to use the damage checker</h2>
+      </div>
+      <ol class="instruction-list">
+        <li><strong>Record two different videos:</strong> one before and one after inspection.</li>
+        <li><strong>Keep each video under 5 minutes</strong> and show the vehicle throughout.</li>
+        <li><strong>Use the same vehicle and registration number</strong> in both videos. Keep the number plate visible and readable.</li>
+        <li><strong>Do not include people, animals, or unrelated objects.</strong> Use good lighting and a steady camera angle.</li>
+        <li>After both videos pass AI checks, move the slider to compare a moment, then run the analysis.</li>
+        <li>Capture the evidence frame and download the PDF report if a possible change is found.</li>
+      </ol>
+      <p class="instruction-note">AI results are visual guidance only. Always confirm scratches or damage manually before making a claim or decision.</p>
+    </section>
+
+    <section class="privacy-card" aria-labelledby="privacy-heading">
+      <div class="privacy-icon" aria-hidden="true">✓</div>
+      <div>
+        <p class="eyebrow">PRIVACY &amp; TERMS</p>
+        <h2 id="privacy-heading">Your videos stay on your device</h2>
+        <p>We do not ask for, upload, or store your videos, vehicle images, registration number, or damage report data. Video checking and AI analysis run locally in this browser. Temporary previews are removed when you close or refresh this page.</p>
+        <p class="privacy-note">The app loads its AI libraries from public CDNs. Those libraries do not receive your video files. Do not use this tool as a substitute for a professional inspection or insurance decision.</p>
+      </div>
+    </section>
+
+    <section class="upload-grid" aria-label="Video uploads">
+      <label class="upload-card" for="beforeVideo">
+        <span class="step">01</span>
+        <span class="card-title">Before video</span>
+        <span class="card-copy">The vehicle's reference condition</span>
+        <span class="file-button">Choose video</span>
+        <span class="file-name" id="beforeName">No file selected</span>
+        <span class="vehicle-type" id="beforeVehicleType">Vehicle type and color will appear after upload</span>
+        <span class="validation-message" id="beforeValidation"></span>
+        <input id="beforeVideo" type="file" accept="video/*">
+      </label>
+      <label class="upload-card" for="afterVideo">
+        <span class="step">02</span>
+        <span class="card-title">After video</span>
+        <span class="card-copy">The vehicle's current condition</span>
+        <span class="file-button">Choose video</span>
+        <span class="file-name" id="afterName">No file selected</span>
+        <span class="vehicle-type" id="afterVehicleType">Vehicle type and color will appear after upload</span>
+        <span class="validation-message" id="afterValidation"></span>
+        <input id="afterVideo" type="file" accept="video/*">
+      </label>
+    </section>
+
+    <section class="review-panel" aria-labelledby="review-heading">
+      <div class="analysis-overlay" id="analysisOverlay" aria-live="polite" aria-hidden="true">
+        <div class="scan-animation" aria-hidden="true">
+          <span class="scan-ring"></span>
+          <span class="scan-line"></span>
+        </div>
+        <strong id="analysisOverlayTitle">Analyzing videos</strong>
+        <span id="analysisOverlayText">Preparing full-video review...</span>
+        <div class="analysis-progress">
+          <span id="analysisProgressBar"></span>
+        </div>
+        <span class="analysis-progress-label" id="analysisProgressLabel">0%</span>
+      </div>
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">FRAME REVIEW</p>
+          <h2 id="review-heading">Synchronized playback</h2>
+        </div>
+        <button class="primary-button" id="scanButton" type="button" disabled>Run AI analysis</button>
+      </div>
+
+      <div class="video-grid">
+        <div class="video-wrap">
+          <span class="video-label">BEFORE</span>
+          <div class="video-stage">
+            <video id="beforePreview" controls playsinline preload="metadata"></video>
+            <div class="damage-box" id="beforeDamageBox"></div>
+          </div>
+          <div class="empty-video" id="beforeEmpty">Upload a before video to preview it</div>
+        </div>
+        <div class="video-wrap">
+          <span class="video-label">AFTER</span>
+          <div class="video-stage">
+            <video id="afterPreview" controls playsinline preload="metadata"></video>
+            <div class="damage-box" id="afterDamageBox"></div>
+          </div>
+          <div class="empty-video" id="afterEmpty">Upload an after video to preview it</div>
+        </div>
+      </div>
+
+      <div class="timeline-row">
+        <label for="scrubber">Compare position</label>
+        <input id="scrubber" type="range" min="0" max="0" value="0" step="0.01" disabled>
+        <output id="timeLabel">00:00 / 00:00</output>
+      </div>
+      <p class="hint">AI samples both videos from start to finish before answering. Processing is optimized for speed, but the result is still visual guidance and should be manually confirmed.</p>
+      <div class="identity-check" id="identityCheck" aria-live="polite">Upload both accepted videos to verify the same vehicle and registration number.</div>
+      <div class="evidence-row">
+        <span id="evidenceLabel">No analyzed evidence captured yet</span>
+        <button class="secondary-button" id="captureButton" type="button" disabled>Capture damage frame</button>
+        <button class="secondary-button" id="reportButton" type="button" disabled>Download PDF report</button>
+      </div>
+      <div class="review-window" id="reviewWindow">Careful review window: no video portion analyzed yet.</div>
+    </section>
+
+    <section class="result-card" id="resultCard" aria-live="polite">
+      <div class="result-icon" id="resultIcon">?</div>
+      <div>
+        <p class="eyebrow">AI REVIEW RESULT</p>
+        <h2 id="resultTitle">Upload both videos to begin</h2>
+        <p id="resultText">This tool highlights visual differences. Lighting, camera angle, and reflections can also create differences, so confirm any scratch or damage yourself.</p>
+      </div>
+    </section>
+
+    <canvas id="comparisonCanvas" hidden></canvas>
+    <canvas id="evidenceCanvas" hidden></canvas>
+    <img id="reportLogo" src="vehicle-logo.jpe" alt="" hidden>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
