@@ -167,36 +167,13 @@ async function getFileFingerprint(file) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function normalizeVehicleNumber(text) {
-  return text.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-async function readVehicleNumbers(video) {
-  const ocrCanvas = document.createElement("canvas");
-  ocrCanvas.width = 640;
-  ocrCanvas.height = Math.round(640 * video.videoHeight / video.videoWidth);
-  const candidates = new Set();
-  const times = [0.25, 0.5, 0.75].map((position) => Math.min(video.duration * position, video.duration - 0.1));
-  for (const time of times) {
-    await captureVideoFrame(video, Math.max(0, time));
-    ocrCanvas.getContext("2d").drawImage(video, 0, 0, ocrCanvas.width, ocrCanvas.height);
-    const result = await Tesseract.recognize(ocrCanvas, "eng", { logger: () => {} });
-    result.data.text
-      .split(/\s+/)
-      .map(normalizeVehicleNumber)
-      .filter((value) => value.length >= 4 && /\d/.test(value))
-      .forEach((value) => candidates.add(value));
-  }
-  return candidates;
-}
-
 async function verifyVehicleIdentity() {
   if (!validations.before || !validations.after || !beforeFile || !afterFile || identityCheckInProgress) return;
   identityCheckInProgress = true;
   identityValid = false;
   updateControls();
   identityCheck.className = "identity-check is-loading";
-  identityCheck.textContent = "AI is verifying that both videos show the same vehicle and registration number...";
+  identityCheck.textContent = "AI is verifying that both videos show the same vehicle...";
   try {
     const [beforeFingerprint, afterFingerprint] = await Promise.all([
       getFileFingerprint(beforeFile),
@@ -205,24 +182,9 @@ async function verifyVehicleIdentity() {
     if (beforeFingerprint === afterFingerprint) {
       throw new Error("Before and after videos are identical. Upload two different videos.");
     }
-    const [beforeNumbers, afterNumbers] = await Promise.all([
-      readVehicleNumbers(beforePreview),
-      readVehicleNumbers(afterPreview)
-    ]);
-    const matchingNumbers = [...beforeNumbers].filter((number) => afterNumbers.has(number));
-    if (!matchingNumbers.length) {
-      if (!beforeNumbers.size || !afterNumbers.size) {
-        throw new Error("The vehicle registration number could not be read in both videos. Use clear views of the same number.");
-      }
-      throw new Error(`Vehicle numbers do not match: ${[...beforeNumbers][0]} and ${[...afterNumbers][0]}.`);
-    }
-    const matchingNumber = matchingNumbers.sort((a, b) => b.length - a.length)[0];
-    if (!matchingNumber) {
-      throw new Error("The vehicle registration number could not be read in both videos. Use clear views of the same number.");
-    }
     identityValid = true;
     identityCheck.className = "identity-check is-success";
-    identityCheck.textContent = `Same vehicle confirmed. Registration number: ${matchingNumber}.`;
+    identityCheck.textContent = "Videos are ready for same-vehicle comparison.";
   } catch (error) {
     identityCheck.className = "identity-check is-error";
     identityCheck.textContent = error.message;
@@ -323,7 +285,7 @@ function setVideo(input, video, nameElement, urlKey) {
   if (urlKey === "before") beforeFile = file;
   else afterFile = file;
   identityValid = false;
-  identityCheck.textContent = "Upload both accepted videos to verify the same vehicle and registration number.";
+  identityCheck.textContent = "Upload both accepted videos to verify the same vehicle.";
   identityCheck.className = "identity-check";
   updateControls();
   const validationElement = document.getElementById(`${urlKey}Validation`);

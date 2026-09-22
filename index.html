@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 </head>
 <body>
@@ -42,7 +41,7 @@
       <ol class="instruction-list">
         <li><strong>Record two different videos:</strong> one before and one after inspection.</li>
         <li><strong>Keep each video under 5 minutes</strong> and show the vehicle throughout.</li>
-        <li><strong>Use the same vehicle and registration number</strong> in both videos. Keep the number plate visible and readable.</li>
+        <li><strong>Use the same vehicle</strong> in both videos and keep it visible throughout.</li>
         <li><strong>Do not include people, animals, or unrelated objects.</strong> Use good lighting and a steady camera angle.</li>
         <li>After both videos pass AI checks, move the slider to compare a moment, then run the analysis.</li>
         <li>Capture the evidence frame and download the PDF report if a possible change is found.</li>
@@ -55,7 +54,7 @@
       <div>
         <p class="eyebrow">PRIVACY &amp; TERMS</p>
         <h2 id="privacy-heading">Your videos stay on your device</h2>
-        <p>We do not ask for, upload, or store your videos, vehicle images, registration number, or damage report data. Video checking and AI analysis run locally in this browser. Temporary previews are removed when you close or refresh this page.</p>
+        <p>We do not ask for, upload, or store your videos, vehicle images, or damage report data. Video checking and AI analysis run locally in this browser. Temporary previews are removed when you close or refresh this page.</p>
         <p class="privacy-note">The app loads its AI libraries from public CDNs. Those libraries do not receive your video files. Do not use this tool as a substitute for a professional inspection or insurance decision.</p>
       </div>
     </section>
@@ -129,7 +128,7 @@
         <output id="timeLabel">00:00 / 00:00</output>
       </div>
       <p class="hint">AI samples both videos from start to finish before answering. Processing is optimized for speed, but the result is still visual guidance and should be manually confirmed.</p>
-      <div class="identity-check" id="identityCheck" aria-live="polite">Upload both accepted videos to verify the same vehicle and registration number.</div>
+      <div class="identity-check" id="identityCheck" aria-live="polite">Upload both accepted videos to verify the same vehicle.</div>
       <div class="evidence-row">
         <span id="evidenceLabel">No analyzed evidence captured yet</span>
         <button class="secondary-button" id="captureButton" type="button" disabled>Capture damage frame</button>
