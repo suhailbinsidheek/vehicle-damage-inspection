@@ -40,6 +40,9 @@ const BLOCKED_CLASSES = new Set(["person", "cat", "dog", "bird", "horse"]);
 const STABILITY_WIDTH = 64;
 const STABILITY_HEIGHT = 36;
 const SEGMENT_COUNT = 8;
+const MAX_REVIEW_CHECKPOINTS = 120;
+const DAMAGE_THRESHOLD = 0.06;
+const MAX_REPORT_EVIDENCE = 8;
 
 function hideEntrySplash() {
   if (entrySplash) entrySplash.classList.add("is-hidden");
@@ -300,7 +303,10 @@ async function analyzeFrame() {
   try {
     const beforeDuration = beforePreview.duration;
     const afterDuration = afterPreview.duration;
-    const sampleCount = Math.min(16, Math.max(8, Math.ceil(Math.max(beforeDuration, afterDuration) / 8)));
+    const sampleCount = Math.min(
+      MAX_REVIEW_CHECKPOINTS,
+      Math.max(12, Math.ceil(Math.max(beforeDuration, afterDuration) * 2))
+    );
     const progressPositions = Array.from({ length: sampleCount }, (_, index) => index / (sampleCount - 1));
     const selectedTime = Math.min(Math.max(0, Number(scrubber.value)), Math.min(beforeDuration, afterDuration));
     const model = await loadDetector();
@@ -315,19 +321,39 @@ async function analyzeFrame() {
         detectVehicleBox(model, beforePreview),
         detectVehicleBox(model, afterPreview)
       ]);
-      frameResults.push(compareCurrentFrames(beforeVehicle, afterVehicle));
+      frameResults.push({
+        ...compareCurrentFrames(beforeVehicle, afterVehicle),
+        timestamp: afterDuration * videoProgress
+      });
       const progress = Math.round(((index + 1) / sampleCount) * 100);
       reviewWindow.textContent = `AI reviewed ${index + 1} of ${sampleCount} full-video checkpoints (${progress}%).`;
       analysisProgressBar.style.width = `${progress}%`;
       analysisProgressLabel.textContent = `${progress}%`;
       analysisOverlayText.textContent = `Reviewing checkpoint ${index + 1} of ${sampleCount}...`;
     }
-    const changedFrames = frameResults.filter((result) => result.changeRatio > 0.08);
+    const changedFrames = frameResults.filter((result) => result.changeRatio > DAMAGE_THRESHOLD && result.damageBox);
     const changeRatio = frameResults.reduce((sum, result) => sum + result.changeRatio, 0) / frameResults.length;
-    const consistentChange = changedFrames.length >= Math.ceil(frameResults.length * 0.6) && changeRatio > 0.08;
+    const consistentChange = changedFrames.length > 0;
     const representative = changedFrames[Math.floor(changedFrames.length / 2)] || frameResults[Math.floor(frameResults.length / 2)];
     const damageBox = consistentChange ? representative.damageBox : null;
     const confidence = Math.round((Math.max(changedFrames.length, frameResults.length - changedFrames.length) / frameResults.length) * 100);
+    const evidenceCandidates = changedFrames
+      .slice()
+      .sort((first, second) => second.changeRatio - first.changeRatio)
+      .filter((candidate, index, candidates) => {
+        const centerX = candidate.damageBox.left + candidate.damageBox.width / 2;
+        const centerY = candidate.damageBox.top + candidate.damageBox.height / 2;
+        return !candidates.slice(0, index).some((previous) => {
+          const previousCenterX = previous.damageBox.left + previous.damageBox.width / 2;
+          const previousCenterY = previous.damageBox.top + previous.damageBox.height / 2;
+          const distance = Math.hypot(
+            (centerX - previousCenterX) / candidate.width,
+            (centerY - previousCenterY) / candidate.height
+          );
+          return distance < 0.14;
+        });
+      })
+      .slice(0, MAX_REPORT_EVIDENCE);
     await Promise.all([
       captureVideoFrame(beforePreview, selectedTime),
       captureVideoFrame(afterPreview, selectedTime)
@@ -337,22 +363,40 @@ async function analyzeFrame() {
       detectVehicleBox(model, afterPreview)
     ]);
     const selectedFrame = compareCurrentFrames(selectedBeforeVehicle, selectedAfterVehicle);
-    lastAnalysis.damageBox = consistentChange ? representative.damageBox : selectedFrame.damageBox;
     lastAnalysis = {
-    timestamp: selectedTime,
-    reviewStart: 0,
-    reviewEnd: Math.max(beforeDuration, afterDuration),
-    changeRatio,
-    damageBox,
-    frameWidth: representative.width,
-    frameHeight: representative.height,
-    confidence,
-    changedFrames: changedFrames.length,
-    reviewedFrames: frameResults.length,
-    finding: consistentChange ? "Possible visual change detected across the complete video review" : "No consistent change confirmed across the complete video review"
+      timestamp: selectedTime,
+      reviewStart: 0,
+      reviewEnd: Math.max(beforeDuration, afterDuration),
+      changeRatio,
+      damageBox: consistentChange ? damageBox : selectedFrame.damageBox,
+      frameWidth: representative.width,
+      frameHeight: representative.height,
+      confidence,
+      changedFrames: changedFrames.length,
+      reviewedFrames: frameResults.length,
+      finding: consistentChange ? "Possible visual change detected across the complete video review" : "No consistent change confirmed across the complete video review",
+      evidence: []
     };
+    for (const candidate of evidenceCandidates) {
+      await captureVideoFrame(afterPreview, candidate.timestamp);
+      const imageWidth = 960;
+      const imageHeight = Math.round(imageWidth * afterPreview.videoHeight / afterPreview.videoWidth);
+      evidenceCanvas.width = imageWidth;
+      evidenceCanvas.height = imageHeight;
+      evidenceCanvas.getContext("2d").drawImage(afterPreview, 0, 0, imageWidth, imageHeight);
+      lastAnalysis.evidence.push({
+        image: evidenceCanvas.toDataURL("image/jpeg", 0.82),
+        timestamp: candidate.timestamp,
+        changeRatio: candidate.changeRatio,
+        damageBox: candidate.damageBox,
+        frameWidth: candidate.width,
+        frameHeight: candidate.height
+      });
+    }
     showDamageBox(damageBox);
-    evidenceLabel.textContent = `Evidence frame: ${formatTime(lastAnalysis.timestamp)} | ${Math.round(changeRatio * 100)}% average visual difference`;
+    evidenceLabel.textContent = lastAnalysis.evidence.length
+      ? `${lastAnalysis.evidence.length} distinct damage area(s) captured for the PDF`
+      : `No distinct damage areas captured | ${Math.round(changeRatio * 100)}% average visual difference`;
     reviewWindow.className = `review-window ${consistentChange ? "is-warning" : "is-clear"}`;
     reviewWindow.textContent = `Carefully reviewed both videos from start to finish using ${lastAnalysis.reviewedFrames} matched checkpoints. ${lastAnalysis.changedFrames} checkpoints showed a change. AI consistency: ${confidence}%.`;
     resultCard.classList.remove("is-warning", "is-clear");
@@ -565,44 +609,68 @@ function captureEvidence() {
     evidenceCanvas.height = height;
     evidenceCanvas.getContext("2d").drawImage(afterPreview, 0, 0, width, height);
     evidenceLabel.textContent = `Damage frame captured at ${formatTime(lastAnalysis.timestamp)} from the after video`;
-    lastAnalysis.image = evidenceCanvas.toDataURL("image/jpeg", 0.88);
+    const evidence = {
+      image: evidenceCanvas.toDataURL("image/jpeg", 0.88),
+      timestamp: lastAnalysis.timestamp,
+      changeRatio: lastAnalysis.changeRatio,
+      damageBox: lastAnalysis.damageBox,
+      frameWidth: lastAnalysis.frameWidth,
+      frameHeight: lastAnalysis.frameHeight
+    };
+    lastAnalysis.evidence = [evidence, ...(lastAnalysis.evidence || [])].slice(0, MAX_REPORT_EVIDENCE);
     reportButton.disabled = false;
 }
 
 async function downloadReport() {
     if (!lastAnalysis) return;
-    if (!lastAnalysis.image) captureEvidence();
-    if (!lastAnalysis.image || !window.jspdf) {
+    if (!lastAnalysis.evidence?.length) captureEvidence();
+    if (!lastAnalysis.evidence?.length || !window.jspdf) {
       resultText.textContent = "PDF library is unavailable. Please check your internet connection and try again.";
       return;
     }
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF();
-    pdf.setFontSize(22);
+    const logoCanvas = document.createElement("canvas");
     if (reportLogo.complete && reportLogo.naturalWidth) {
-      const logoCanvas = document.createElement("canvas");
       logoCanvas.width = reportLogo.naturalWidth;
       logoCanvas.height = reportLogo.naturalHeight;
       logoCanvas.getContext("2d").drawImage(reportLogo, 0, 0);
-      pdf.addImage(logoCanvas.toDataURL("image/jpeg", 0.9), "JPEG", 160, 12, 25, 18);
     }
-    pdf.text("Vehicle Damage Report", 20, 24);
-    pdf.setFontSize(11);
-    pdf.setTextColor(90);
-    pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 34);
-    pdf.text(`Analyzed video position: ${formatTime(lastAnalysis.timestamp)}`, 20, 42);
-    pdf.text(`Reviewed portion: ${formatTime(lastAnalysis.reviewStart)} - ${formatTime(lastAnalysis.reviewEnd)}`, 20, 48);
-    pdf.text(`Visual difference: ${Math.round(lastAnalysis.changeRatio * 100)}% | AI consistency: ${lastAnalysis.confidence}%`, 20, 56);
-    pdf.setTextColor(30);
-    pdf.setFontSize(15);
-    pdf.text(lastAnalysis.finding, 20, 70);
-    pdf.setFontSize(10);
-    pdf.setTextColor(90);
-    const warning = "AI evidence is visual guidance only. Confirm damage manually; lighting, angle, reflections, and movement may affect the result.";
-    pdf.text(pdf.splitTextToSize(warning, 170), 20, 80);
-    pdf.addImage(lastAnalysis.image, "JPEG", 20, 100, 170, 95);
-    pdf.setDrawColor(255, 173, 35);
-    pdf.rect(20 + 170 * 0.2, 100 + 95 * 0.2, 170 * 0.6, 95 * 0.6);
+    lastAnalysis.evidence.forEach((evidence, index) => {
+      if (index > 0) pdf.addPage();
+      pdf.setFontSize(22);
+      if (logoCanvas.width) pdf.addImage(logoCanvas.toDataURL("image/jpeg", 0.9), "JPEG", 160, 12, 25, 18);
+      pdf.text("Vehicle Damage Report", 20, 24);
+      pdf.setFontSize(11);
+      pdf.setTextColor(90);
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 34);
+      pdf.text(`Evidence ${index + 1} of ${lastAnalysis.evidence.length}`, 20, 42);
+      pdf.text(`Video position: ${formatTime(evidence.timestamp)}`, 20, 50);
+      pdf.text(`Reviewed: ${formatTime(lastAnalysis.reviewStart)} - ${formatTime(lastAnalysis.reviewEnd)}`, 20, 58);
+      pdf.text(`Visual difference: ${Math.round(evidence.changeRatio * 100)}% | AI consistency: ${lastAnalysis.confidence}%`, 20, 66);
+      pdf.setTextColor(30);
+      pdf.setFontSize(15);
+      pdf.text(lastAnalysis.finding, 20, 80);
+      pdf.setFontSize(10);
+      pdf.setTextColor(90);
+      const warning = "AI evidence is visual guidance only. Confirm damage manually; lighting, angle, reflections, and movement may affect the result.";
+      pdf.text(pdf.splitTextToSize(warning, 170), 20, 90);
+      const imageX = 20;
+      const imageY = 110;
+      const imageWidth = 170;
+      const imageHeight = 95;
+      pdf.addImage(evidence.image, "JPEG", imageX, imageY, imageWidth, imageHeight);
+      if (evidence.damageBox) {
+        pdf.setDrawColor(255, 173, 35);
+        pdf.setLineWidth(1.2);
+        pdf.rect(
+          imageX + (evidence.damageBox.left / evidence.frameWidth) * imageWidth,
+          imageY + (evidence.damageBox.top / evidence.frameHeight) * imageHeight,
+          (evidence.damageBox.width / evidence.frameWidth) * imageWidth,
+          (evidence.damageBox.height / evidence.frameHeight) * imageHeight
+        );
+      }
+    });
     pdf.save(`vehicle-damage-report-${Date.now()}.pdf`);
 }
 
