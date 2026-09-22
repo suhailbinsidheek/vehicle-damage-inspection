@@ -18,7 +18,6 @@ const evidenceLabel = document.getElementById("evidenceLabel");
 const evidenceCanvas = document.getElementById("evidenceCanvas");
 const beforeDamageBox = document.getElementById("beforeDamageBox");
 const afterDamageBox = document.getElementById("afterDamageBox");
-const identityCheck = document.getElementById("identityCheck");
 const reviewWindow = document.getElementById("reviewWindow");
 const analysisOverlay = document.getElementById("analysisOverlay");
 const analysisOverlayText = document.getElementById("analysisOverlayText");
@@ -33,8 +32,6 @@ let afterFile;
 let detector;
 const validations = { before: false, after: false };
 const stabilityResults = { before: null, after: null };
-let identityValid = false;
-let identityCheckInProgress = false;
 let reviewInProgress = false;
 let syncingVideos = false;
 let lastAnalysis = null;
@@ -149,7 +146,7 @@ function getSegmentTimes(duration) {
 }
 
 function updateControls() {
-  const ready = validations.before && validations.after && identityValid;
+  const ready = validations.before && validations.after;
   scanButton.disabled = !ready;
   scrubber.disabled = !ready;
   captureButton.disabled = !lastAnalysis;
@@ -158,39 +155,6 @@ function updateControls() {
     const duration = Math.min(beforePreview.duration || 0, afterPreview.duration || 0);
     scrubber.max = String(duration);
     timeLabel.textContent = `${formatTime(0)} / ${formatTime(duration)}`;
-  }
-}
-
-async function getFileFingerprint(file) {
-  const buffer = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function verifyVehicleIdentity() {
-  if (!validations.before || !validations.after || !beforeFile || !afterFile || identityCheckInProgress) return;
-  identityCheckInProgress = true;
-  identityValid = false;
-  updateControls();
-  identityCheck.className = "identity-check is-loading";
-  identityCheck.textContent = "AI is verifying that both videos show the same vehicle...";
-  try {
-    const [beforeFingerprint, afterFingerprint] = await Promise.all([
-      getFileFingerprint(beforeFile),
-      getFileFingerprint(afterFile)
-    ]);
-    if (beforeFingerprint === afterFingerprint) {
-      throw new Error("Before and after videos are identical. Upload two different videos.");
-    }
-    identityValid = true;
-    identityCheck.className = "identity-check is-success";
-    identityCheck.textContent = "Videos are ready for same-vehicle comparison.";
-  } catch (error) {
-    identityCheck.className = "identity-check is-error";
-    identityCheck.textContent = error.message;
-  } finally {
-    identityCheckInProgress = false;
-    updateControls();
   }
 }
 
@@ -270,7 +234,6 @@ async function validateVideo(video, messageElement, key) {
     const stabilizationNote = stability.stable ? " Stable footage." : ` Stabilized ${unstableSegments} segment(s).`;
     messageElement.textContent = `AI accepted this video (${vehicleFrames}/${sampleTimes.length} vehicle detections).${stabilizationNote}${vehicleWarning}`;
     updateControls();
-    verifyVehicleIdentity();
   } catch (error) {
     validations[key] = false;
     messageElement.className = "validation-message is-error";
@@ -284,9 +247,6 @@ function setVideo(input, video, nameElement, urlKey) {
   if (!file) return;
   if (urlKey === "before") beforeFile = file;
   else afterFile = file;
-  identityValid = false;
-  identityCheck.textContent = "Upload both accepted videos to verify the same vehicle.";
-  identityCheck.className = "identity-check";
   updateControls();
   const validationElement = document.getElementById(`${urlKey}Validation`);
   const vehicleTypeElement = document.getElementById(`${urlKey}VehicleType`);
